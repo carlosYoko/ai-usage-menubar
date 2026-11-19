@@ -38,7 +38,7 @@ struct MenuContentView: View {
         HStack {
             Label("AI Usage", systemImage: "chart.bar.xaxis").font(.headline)
             Spacer()
-            if model.codexLoading || model.copilotLoading || model.githubBusy {
+            if model.codexLoading || model.copilotLoading {
                 ProgressView().controlSize(.small)
             }
         }
@@ -99,55 +99,51 @@ struct MenuContentView: View {
                 Text("GitHub Copilot").font(.subheadline.weight(.semibold))
                 Spacer()
                 if model.githubConnected {
-                    Button("Disconnect") { model.disconnectGitHub() }.buttonStyle(.link)
+                    Text(model.githubUsesCLI ? "via GitHub CLI" : "linked")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    Button(model.githubUsesCLI ? "Hide" : "Disconnect") { model.disconnectGitHub() }
+                        .buttonStyle(.link)
                 }
             }
-            if let report = model.copilotReport {
-                if !report.metrics.isEmpty {
-                    ForEach(report.metrics) { metric in
-                        HStack {
-                            Text(metric.label)
-                            Spacer()
-                            Text("\(Int(metric.remainingPercent.rounded()))% remaining").monospacedDigit()
-                            if let reset = metric.resetsAt { Text(countdown(to: reset)).foregroundStyle(.secondary) }
-                        }.font(.caption)
+            ForEach(model.copilotAccounts) { account in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(account.login).font(.caption.weight(.medium))
+                    if let report = account.report {
+                        ForEach(report.metrics) { metric in
+                            HStack {
+                                Text(metric.label)
+                                Spacer()
+                                Text("\(Int(metric.remainingPercent.rounded()))% remaining").monospacedDigit()
+                                if let reset = metric.resetsAt { Text(countdown(to: reset)).foregroundStyle(.secondary) }
+                            }.font(.caption)
+                        }
+                        Text("Updated \(report.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    } else if let error = account.error {
+                        Text(error).font(.caption).foregroundStyle(.red)
                     }
-                } else if let used = report.creditsUsed {
-                    Text("Credits used: \(quantity(used)) · percentage unavailable")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Quota from GitHub's undocumented Copilot endpoint; may change without notice.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                Text("Updated \(report.fetchedAt.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            } else if let error = model.copilotError {
-                Text(error).font(.caption).foregroundStyle(.red)
-            } else if model.githubConnected {
-                Text(model.copilotLoading ? "Reading Copilot quota…" : "No quota data loaded")
+            }
+            if model.copilotAccounts.isEmpty && model.githubConnected && model.copilotLoading {
+                Text("Reading Copilot quotas…").font(.caption).foregroundStyle(.secondary)
+            } else if !model.githubConnected {
+                Text("No GitHub CLI session found. Sign in without an API key.")
                     .font(.caption).foregroundStyle(.secondary)
-            } else {
-                Text("Connect GitHub to read Copilot quota.")
+                Button(model.isGitHubHidden ? "Show GitHub accounts" : "Sign in with GitHub CLI") {
+                    model.connectGitHub()
+                }
+            }
+            if model.githubConnected && model.copilotAccounts.isEmpty && !model.copilotLoading {
+                Text(model.copilotError ?? "No GitHub accounts available.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if !model.githubConnected {
-                TextField("GitHub OAuth App Client ID", text: $model.githubClientID)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { model.saveClientID() }
-                HStack {
-                    Button(model.githubBusy ? "Waiting for GitHub…" : "Connect with GitHub") {
-                        Task { await model.connectGitHub() }
-                    }
-                    .disabled(model.githubBusy || model.githubClientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    if let authorization = model.authorization {
-                        Text(authorization.userCode).font(.system(.caption, design: .monospaced).weight(.bold))
-                        Button("Open verification") { model.openVerificationPage() }
-                    }
-                }
-                Text("Requires a device-flow-enabled GitHub OAuth App; requests read:user.")
-                    .font(.caption2).foregroundStyle(.tertiary)
-            }
-            if let message = model.authorizationMessage {
+            Text("Quota uses GitHub's undocumented Copilot endpoint and may change without notice.")
+                .font(.caption2).foregroundStyle(.secondary)
+            if let message = model.githubMessage {
                 Text(message).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let error = model.copilotError {
+                Text(error).font(.caption2).foregroundStyle(.red)
             }
         }
     }

@@ -3,6 +3,13 @@ import Combine
 import AppKit
 import UsageCore
 
+struct CopilotAccountStatus: Sendable, Identifiable {
+    let login: String
+    let report: CopilotQuotaReport?
+    let error: String?
+    var id: String { login }
+}
+
 private struct PendingResetAttempt: Codable {
     let creditID: String
     let title: String
@@ -18,20 +25,19 @@ final class AppModel: ObservableObject {
     @Published var showResetConfirmation = false
     @Published var resetMessage: String?
     @Published var resetError: String?
-    @Published var copilotReport: CopilotQuotaReport?
+    @Published var copilotAccounts: [CopilotAccountStatus] = []
     @Published var copilotError: String?
     @Published var copilotLoading = false
-    @Published var githubClientID = UserDefaults.standard.string(forKey: "githubClientID") ?? ""
     @Published var githubConnected = false
-    @Published var authorization: DeviceAuthorization?
-    @Published var authorizationMessage: String?
-    @Published var githubBusy = false
+    @Published var githubUsesCLI = false
+    @Published var githubMessage: String?
 
     private let codex = CodexAppServerClient()
-    private let deviceFlow = GitHubDeviceFlow()
+    private let githubCLI = GitHubCLIAuthClient()
     private let github = GitHubCopilotClient()
     private let tokenStore = GitHubTokenStore()
     private var token: String?
+    private var githubHidden = UserDefaults.standard.bool(forKey: "github.hiddenInApp")
     private var pendingReset: PendingResetAttempt? {
         didSet {
             if let pendingReset, let data = try? JSONEncoder().encode(pendingReset) {
@@ -53,7 +59,7 @@ final class AppModel: ObservableObject {
             copilotError = error.localizedDescription
         }
         Task { await refreshCodex() }
-        if token != nil { Task { await refreshCopilot() } }
+        Task { await refreshCopilot() }
         Task {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(300))
@@ -65,6 +71,7 @@ final class AppModel: ObservableObject {
     }
 
     var pendingResetTitle: String? { pendingReset?.title }
+    var isGitHubHidden: Bool { githubHidden }
 
     var menuBarTitle: String {
         var items: [String] = codexReport?.windows.map { window in
@@ -74,8 +81,9 @@ final class AppModel: ObservableObject {
             else { duration = "\(window.durationMinutes)m" }
             return "\(duration) \(Int(window.remainingPercent.rounded()))%"
         } ?? []
-        if let copilot = copilotReport?.metrics.first {
-            items.append("Copilot \(Int(copilot.remainingPercent.rounded()))%")
+        for account in copilotAccounts {
+            guard let metric = account.report?.metrics.first else { continue }
+            items.append("GH:\(account.login) \(Int(metric.remainingPercent.rounded()))%")
         }
         if items.isEmpty { return codexError == nil ? "AI Usage" : "Codex !" }
         return items.joined(separator: "  ")
@@ -111,11 +119,6 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func saveClientID() {
-        githubClientID = githubClientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        UserDefaults.standard.set(githubClientID, forKey: "githubClientID")
-    }
-
     func refreshCodex() async {
         guard !codexLoading else { return }
         codexLoading = true
@@ -127,17 +130,44 @@ final class AppModel: ObservableObject {
 
     func refreshCopilot() async {
         guard !copilotLoading else { return }
-        guard let token else {
-            copilotReport = nil
-            copilotError = nil
+        guard !githubHidden else {
+            copilotAccounts = []
+            githubConnected = false
             return
         }
         copilotLoading = true
         copilotError = nil
         defer { copilotLoading = false }
+
+        let cliAccounts = await githubCLI.accounts()
+        if !cliAccounts.isEmpty {
+            githubUsesCLI = true
+            var reports: [CopilotAccountStatus] = []
+            for account in cliAccounts {
+                do {
+                    let report = try await github.copilotQuota(token: account.accessToken)
+                    reports.append(CopilotAccountStatus(login: account.login, report: report, error: nil))
+                } catch {
+                    reports.append(CopilotAccountStatus(login: account.login, report: nil, error: error.localizedDescription))
+                }
+            }
+            copilotAccounts = reports
+            githubConnected = true
+            return
+        }
+
+        githubUsesCLI = false
+        guard let token else {
+            copilotAccounts = []
+            githubConnected = false
+            return
+        }
         do {
-            copilotReport = try await github.copilotQuota(token: token)
+            let report = try await github.copilotQuota(token: token)
+            copilotAccounts = [CopilotAccountStatus(login: "GitHub account", report: report, error: nil)]
+            githubConnected = true
         } catch {
+            copilotAccounts = [CopilotAccountStatus(login: "GitHub account", report: nil, error: error.localizedDescription)]
             copilotError = error.localizedDescription
             if let providerError = error as? ProviderError, case .unauthorized = providerError {
                 try? tokenStore.delete()
@@ -147,43 +177,38 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func connectGitHub() async {
-        guard !githubBusy else { return }
-        saveClientID()
-        githubBusy = true
-        authorization = nil
-        authorizationMessage = nil
-        copilotError = nil
-        defer { githubBusy = false }
-        do {
-            let flow = try await deviceFlow.begin(clientID: githubClientID)
-            authorization = flow
-            let token = try await deviceFlow.poll(clientID: githubClientID, authorization: flow)
-            try tokenStore.save(token.accessToken)
-            self.token = token.accessToken
-            githubConnected = true
-            authorization = nil
-            authorizationMessage = "GitHub connected. Token stored in macOS Keychain."
-            await refreshCopilot()
-        } catch {
-            authorization = nil
-            copilotError = error.localizedDescription
+    func connectGitHub() {
+        if githubHidden {
+            githubHidden = false
+            UserDefaults.standard.set(false, forKey: "github.hiddenInApp")
+            githubMessage = nil
+            Task { await refreshCopilot() }
+            return
+        }
+        githubMessage = nil
+        let source = #"tell application "Terminal" to do script "gh auth login --hostname github.com --git-protocol https --web""#
+        var errorInfo: NSDictionary?
+        if NSAppleScript(source: source)?.executeAndReturnError(&errorInfo) == nil {
+            githubMessage = "Could not open Terminal for GitHub sign-in. Run `gh auth login --hostname github.com --web` there."
+        } else {
+            githubMessage = "Finish GitHub sign-in in Terminal, then choose Refresh all. No API key is needed."
         }
     }
 
-    func openVerificationPage() {
-        guard let url = authorization?.verificationURL else { return }
-        NSWorkspace.shared.open(url)
-    }
-
     func disconnectGitHub() {
-        do {
-            try tokenStore.delete()
-            token = nil
-            copilotReport = nil
-            copilotError = nil
-            githubConnected = false
-            authorizationMessage = "GitHub disconnected on this Mac. Revoke the app authorization separately in GitHub settings."
-        } catch { copilotError = error.localizedDescription }
+        copilotAccounts = []
+        githubConnected = false
+        copilotError = nil
+        if githubUsesCLI {
+            githubHidden = true
+            UserDefaults.standard.set(true, forKey: "github.hiddenInApp")
+            githubMessage = "Hidden in this app; your GitHub CLI login remains available to other tools."
+        } else {
+            do {
+                try tokenStore.delete()
+                token = nil
+                githubMessage = "GitHub token removed from this app."
+            } catch { copilotError = error.localizedDescription }
+        }
     }
 }

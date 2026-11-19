@@ -1,27 +1,36 @@
 # AI Usage Menubar
 
-Aplicación nativa de macOS (Swift/SwiftUI) para consultar el uso de distintos agentes de IA desde la barra de menús. La primera versión cubrirá Codex y GitHub Copilot; la arquitectura podrá incorporar después Kimi, Claude y otros proveedores.
+Aplicación nativa de macOS (Swift/SwiftUI) para consultar cuotas de Codex y GitHub Copilot desde la barra de menús, ampliable a otros proveedores.
 
-## Alcance previsto
+## Qué muestra
 
-- Codex: porcentajes restantes por ventana en la barra de menús, próximos resets y créditos disponibles mediante `codex app-server`; el canje exige confirmación explícita.
-- GitHub Copilot: mostrar porcentajes restantes de las cuotas comunicadas por el endpoint interno de GitHub; la integración es experimental porque no es una API pública estable.
-- Diseño extensible para añadir Kimi, Claude u otros agentes más adelante.
-- Actualización manual y periódica con caché y hora de última consulta.
-- Credenciales GitHub almacenadas en macOS Keychain; nunca en archivos versionados.
+- Codex: porcentaje restante por ventana, reset y créditos disponibles usando `codex app-server`. El canje de créditos exige confirmación explícita y conserva la clave de idempotencia ante resultados inciertos.
+- Copilot: porcentajes de cuota por cada cuenta GitHub CLI autenticada. El porcentaje principal aparece directamente en la barra de menús.
+- Actualización manual y periódica, con última consulta visible.
 
-## GitHub setup
+## Vincular GitHub sin API key
 
-Register a **GitHub OAuth App** under your account, enable **Device Flow**, and use its Client ID in the app. Authorization requests `read:user`; no client secret or callback URL is used. Do not reuse another project's OAuth client ID.
+La app detecta las cuentas con `gh auth status` y obtiene cada token en tiempo de ejecución mediante `gh auth token`. Los tokens siguen guardados/gestionados por GitHub CLI y no se copian al Keychain de esta app. Se consultan todas las cuentas `github.com` válidas, no solo la activa.
 
-The user approves access on GitHub's browser verification page. The token is stored only in macOS Keychain. Disconnecting removes this Mac's copy; revoke the OAuth authorization separately in GitHub settings.
+Si no hay una sesión, pulsa **Sign in with GitHub CLI**. Se abrirá Terminal con `gh auth login --hostname github.com --git-protocol https --web`; completa el login allí y luego pulsa **Refresh all**. No se necesita API key ni Client ID. Ocultar GitHub en esta app no cierra la sesión CLI.
 
-**Copilot quota caveat:** percentage quotas come from `GET https://api.github.com/copilot_internal/user`, an undocumented internal GitHub endpoint observed in OpenUsage and other Copilot clients. It returns fields such as `percent_remaining` and reset dates. This is not a supported public API contract; GitHub may change or block it without notice, and the app labels it accordingly. The documented billing report endpoint only reports monthly consumption and cannot produce these percentages.
+**Limitación de Copilot:** las cuotas se leen de `GET https://api.github.com/copilot_internal/user`, un endpoint interno/no documentado de GitHub. Informa porcentajes restantes y fechas de reset, pero no es un contrato público estable y puede cambiar o dejar de funcionar. La API de billing documentada solo reporta consumo mensual, no cuota restante.
 
-## Build and check
+## Build y comprobaciones
 
-Requires macOS 13+ and Swift 6. Build the menu bar app with `swift build --product AIUsageMenubar`; run parser, aggregation, Copilot quota decoding, and confirmation-guard checks with `swift run UsageCoreChecks`. Launch locally with `swift run AIUsageMenubar`. The checks do not contact GitHub and never redeem a Codex reset. `swift run UsageCoreChecks --live-codex` performs an optional read-only Codex app-server check.
+Requiere macOS 13+ y Swift 6.
 
-## Status and limitations
+```bash
+swift build --product AIUsageMenubar
+swift run UsageCoreChecks
+swift run AIUsageMenubar
+```
 
-MVP implementation: SwiftUI menu bar app, Codex `app-server` quotas/reset credits, explicitly confirmed reset consumption with a persistent idempotency key for uncertain outcomes, and Copilot quota percentages via an undocumented internal endpoint. This integration is experimental and can break without notice. GitHub OAuth requires the user's own device-flow-enabled OAuth App Client ID; live Copilot authorization has not been tested.
+Las comprobaciones normales no llaman a GitHub ni canjean créditos Codex. Integraciones de solo lectura opcionales:
+
+```bash
+swift run UsageCoreChecks --live-codex
+swift run UsageCoreChecks --live-copilot-cli
+```
+
+Copilot sigue siendo experimental mientras dependa del endpoint interno de GitHub.

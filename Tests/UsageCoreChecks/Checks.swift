@@ -66,6 +66,14 @@ struct UsageCoreChecks {
             let report = try await CodexAppServerClient().readUsage()
             print("Codex read-only integration passed: \(report.windows.count) windows; reset-credit count \(report.availableResetCredits.map(String.init) ?? "unavailable"). No credits consumed.")
         }
+        if CommandLine.arguments.contains("--live-copilot-cli") {
+            let accounts = await GitHubCLIAuthClient().accounts()
+            guard !accounts.isEmpty else { fatalError("No authenticated GitHub CLI accounts found.") }
+            for (index, account) in accounts.enumerated() {
+                let report = try await GitHubCopilotClient().copilotQuota(token: account.accessToken)
+                print("GitHub CLI Copilot read-only check passed for account \(index + 1): \(report.metrics.count) quota metrics.")
+            }
+        }
     }
 
     private static func check(_ condition: @autoclosure () -> Bool, _ message: String) {

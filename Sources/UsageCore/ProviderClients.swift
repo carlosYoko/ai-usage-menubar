@@ -7,12 +7,10 @@ public enum ProviderError: Error, LocalizedError {
     case codexTimedOut
     case codexExited
     case codexProtocol(String)
-    case missingGitHubClientID
     case unauthorized
     case forbidden
     case httpStatus(Int)
     case malformedResponse
-    case deviceAuthorization(String)
     case keychain(OSStatus)
 
     public var errorDescription: String? {
@@ -21,93 +19,68 @@ public enum ProviderError: Error, LocalizedError {
         case .codexTimedOut: "Codex app-server timed out."
         case .codexExited: "Codex app-server exited before returning quota data."
         case .codexProtocol(let message): "Codex app-server error: \(message)"
-        case .missingGitHubClientID: "Enter the Client ID of your GitHub OAuth App."
         case .unauthorized: "GitHub authorization expired. Reconnect the account."
         case .forbidden: "GitHub denied access to the internal Copilot quota endpoint. The endpoint may be unavailable for this account or may have changed."
         case .httpStatus(let code): "GitHub API returned HTTP \(code)."
         case .malformedResponse: "The provider returned an unsupported response."
-        case .deviceAuthorization(let message): "GitHub authorization: \(message)"
         case .keychain(let status): "Keychain error (\(status))."
         }
     }
 }
 
-public struct DeviceAuthorization: Sendable {
-    fileprivate let deviceCode: String
-    public let userCode: String
-    public let verificationURL: URL
-    public let expiresIn: TimeInterval
-    public let interval: TimeInterval
-}
-
-public struct GitHubDeviceToken: Sendable {
+public struct GitHubCLIAccount: Sendable, Identifiable {
+    public let login: String
     public let accessToken: String
-    public let expiresIn: TimeInterval?
+    public var id: String { login }
 }
 
-public final class GitHubDeviceFlow: @unchecked Sendable {
-    private let session: URLSession
-    public init(session: URLSession = .shared) { self.session = session }
+public final class GitHubCLIAuthClient: @unchecked Sendable {
+    private let executableURL: URL?
 
-    public func begin(clientID: String, scope: String = "read:user") async throws -> DeviceAuthorization {
-        guard !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProviderError.missingGitHubClientID }
-        var request = URLRequest(url: URL(string: "https://github.com/login/device/code")!)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = formBody(["client_id": clientID, "scope": scope])
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let deviceCode = json["device_code"] as? String,
-              let userCode = json["user_code"] as? String,
-              let verification = json["verification_uri"] as? String,
-              let verificationURL = URL(string: verification), verificationURL.host == "github.com",
-              let expiresIn = (json["expires_in"] as? NSNumber)?.doubleValue else {
-            throw ProviderError.malformedResponse
-        }
-        return DeviceAuthorization(deviceCode: deviceCode, userCode: userCode, verificationURL: verificationURL,
-                                   expiresIn: expiresIn, interval: (json["interval"] as? NSNumber)?.doubleValue ?? 5)
+    public init(executableURL: URL? = nil) {
+        self.executableURL = executableURL ?? Self.findGitHubCLI()
     }
 
-    public func poll(clientID: String, authorization: DeviceAuthorization) async throws -> GitHubDeviceToken {
-        let deadline = Date.now.addingTimeInterval(authorization.expiresIn)
-        var interval = max(authorization.interval, 1)
-        while Date.now < deadline {
-            try await Task.sleep(for: .seconds(interval))
-            var request = URLRequest(url: URL(string: "https://github.com/login/oauth/access_token")!)
-            request.httpMethod = "POST"
-            request.setValue("application/json", forHTTPHeaderField: "Accept")
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            request.httpBody = formBody([
-                "client_id": clientID,
-                "device_code": authorization.deviceCode,
-                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
-            ])
-            let (data, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                  let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                throw ProviderError.malformedResponse
+    public func accounts() async -> [GitHubCLIAccount] {
+        guard let executableURL else { return [] }
+        return await Task.detached(priority: .utility) {
+            guard let status = Self.run(executableURL, arguments: ["auth", "status", "--hostname", "github.com", "--json", "hosts"]),
+                  let json = try? JSONSerialization.jsonObject(with: status) as? [String: Any],
+                  let hosts = json["hosts"] as? [String: Any],
+                  let users = hosts["github.com"] as? [[String: Any]] else { return [] }
+            let validUsers = users.compactMap { user -> (String, Bool)? in
+                guard user["state"] as? String == "success", let login = user["login"] as? String else { return nil }
+                return (login, user["active"] as? Bool ?? false)
+            }.sorted { $0.1 && !$1.1 || $0.1 == $1.1 && $0.0.localizedCaseInsensitiveCompare($1.0) == .orderedAscending }
+            return validUsers.compactMap { login, _ in
+                guard let data = Self.run(executableURL, arguments: ["auth", "token", "--hostname", "github.com", "--user", login]),
+                      let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !token.isEmpty else { return nil }
+                return GitHubCLIAccount(login: login, accessToken: token)
             }
-            if let token = json["access_token"] as? String {
-                return GitHubDeviceToken(accessToken: token, expiresIn: (json["expires_in"] as? NSNumber)?.doubleValue)
-            }
-            switch json["error"] as? String {
-            case "authorization_pending": continue
-            case "slow_down": interval += 5
-            case "access_denied": throw ProviderError.deviceAuthorization("Access was denied.")
-            case "expired_token": throw ProviderError.deviceAuthorization("The device code expired. Start again.")
-            case let other?: throw ProviderError.deviceAuthorization(other)
-            case nil: throw ProviderError.malformedResponse
-            }
-        }
-        throw ProviderError.deviceAuthorization("The device code expired. Start again.")
+        }.value
     }
 
-    private func formBody(_ values: [String: String]) -> Data {
-        var components = URLComponents()
-        components.queryItems = values.map { URLQueryItem(name: $0.key, value: $0.value) }
-        return Data((components.percentEncodedQuery ?? "").utf8)
+    private static func run(_ executableURL: URL, arguments: [String]) -> Data? {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return process.terminationStatus == 0 ? data : nil
+    }
+
+    private static func findGitHubCLI() -> URL? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var candidates = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "\(home)/.local/bin/gh"]
+        if let path = ProcessInfo.processInfo.environment["PATH"] {
+            candidates += path.split(separator: ":").map { "\($0)/gh" }
+        }
+        return candidates.first(where: FileManager.default.isExecutableFile(atPath:)).map(URL.init(fileURLWithPath:))
     }
 }
 
