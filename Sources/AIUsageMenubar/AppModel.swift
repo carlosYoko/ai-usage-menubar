@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import ServiceManagement
 import UsageCore
 
 struct CopilotAccountStatus: Sendable, Identifiable {
@@ -31,6 +32,9 @@ final class AppModel: ObservableObject {
     @Published var githubConnected = false
     @Published var githubUsesCLI = false
     @Published var githubMessage: String?
+    @Published var launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+    @Published var launchAtLoginMessage: String?
+    @Published private var countdownNow = Date.now
 
     private let codex = CodexAppServerClient()
     private let githubCLI = GitHubCLIAuthClient()
@@ -61,11 +65,17 @@ final class AppModel: ObservableObject {
         Task { await refreshCodex() }
         Task { await refreshCopilot() }
         Task {
+            var minutesSinceRefresh = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(300))
+                try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { return }
-                await refreshCodex()
-                await refreshCopilot()
+                countdownNow = .now
+                minutesSinceRefresh += 1
+                if minutesSinceRefresh == 5 {
+                    minutesSinceRefresh = 0
+                    await refreshCodex()
+                    await refreshCopilot()
+                }
             }
         }
     }
@@ -78,8 +88,11 @@ final class AppModel: ObservableObject {
               let window = report.windows.first(where: { $0.durationMinutes == 300 }) ?? report.windows.first else { return nil }
         let percent = Int(window.remainingPercent.rounded())
         guard let reset = window.resetsAt else { return "\(percent)%" }
-        let hours = max(0, Int(ceil(reset.timeIntervalSinceNow / 3600)))
-        return "\(percent)% \(hours)h"
+        let minutes = max(0, Int(ceil(reset.timeIntervalSince(countdownNow) / 60)))
+        let hours = minutes / 60
+        let remainingMinutes = minutes % 60
+        let time = remainingMinutes == 0 ? "\(hours)h" : "\(hours)h\(remainingMinutes)m"
+        return "\(percent)% \(time)"
     }
 
     var copilotMenuBarText: String? {
@@ -211,6 +224,29 @@ final class AppModel: ObservableObject {
                 token = nil
                 githubMessage = "GitHub token removed from this app."
             } catch { copilotError = error.localizedDescription }
+        }
+    }
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        launchAtLoginMessage = nil
+        guard Bundle.main.bundleURL.pathExtension == "app" else {
+            launchAtLoginEnabled = false
+            launchAtLoginMessage = "Install the .app in Applications before enabling launch at login."
+            return
+        }
+        do {
+            if enabled {
+                try SMAppService.mainApp.register()
+            } else {
+                try SMAppService.mainApp.unregister()
+            }
+            launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+            if SMAppService.mainApp.status == .requiresApproval {
+                launchAtLoginMessage = "Allow AI Usage Menubar in System Settings → General → Login Items."
+            }
+        } catch {
+            launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
+            launchAtLoginMessage = error.localizedDescription
         }
     }
 }

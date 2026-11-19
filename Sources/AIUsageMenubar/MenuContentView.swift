@@ -13,6 +13,14 @@ struct MenuContentView: View {
             Divider()
             copilotSection
             Divider()
+            Toggle("Open at login", isOn: Binding(
+                get: { model.launchAtLoginEnabled },
+                set: { model.setLaunchAtLogin($0) }
+            ))
+            .toggleStyle(.checkbox)
+            if let message = model.launchAtLoginMessage {
+                Text(message).font(.caption2).foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Refresh all") {
                     Task { await model.refreshCodex(); await model.refreshCopilot() }

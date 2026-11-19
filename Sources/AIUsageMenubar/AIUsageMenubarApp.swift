@@ -66,8 +66,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func appendIcon(_ name: String, to title: NSMutableAttributedString) {
-        guard let url = Bundle.module.url(forResource: name, withExtension: "png"),
-              let image = NSImage(contentsOf: url) else { return }
+        let developmentBundleURL = Bundle.main.bundleURL.appendingPathComponent("AIUsageMenubar_AIUsageMenubar.bundle")
+        let url = Bundle.main.url(forResource: name, withExtension: "png")
+            ?? Bundle(path: developmentBundleURL.path)?.url(forResource: name, withExtension: "png")
+        guard let url, let image = NSImage(contentsOf: url) else { return }
         image.isTemplate = true
         image.size = NSSize(width: 12, height: 12)
         let attachment = NSTextAttachment()
