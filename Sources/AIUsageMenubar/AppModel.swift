@@ -81,15 +81,14 @@ final class AppModel: ObservableObject {
         let minutes = max(0, Int(ceil(reset.timeIntervalSinceNow / 60)))
         let hours = minutes / 60
         let remainder = minutes % 60
-        let time = remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+        let time = remainder == 0 ? "\(hours)h" : "\(hours)h\(remainder)m"
         return "\(percent)% \(time)"
     }
 
     var copilotMenuBarText: String? {
         let accounts = copilotAccounts.compactMap { account -> String? in
             guard let metric = account.report?.metrics.first else { return nil }
-            let percent = "M \(Int(metric.remainingPercent.rounded()))%"
-            return copilotAccounts.count == 1 ? percent : "\(account.login) \(percent)"
+            return "M\(Int(metric.remainingPercent.rounded()))%"
         }
         return accounts.isEmpty ? nil : accounts.joined(separator: " ")
     }

@@ -13,19 +13,21 @@ struct AIUsageMenubarApp: App {
         MenuBarExtra {
             MenuContentView(model: model)
         } label: {
-            HStack(spacing: 7) {
+            HStack(spacing: 3) {
                 Image("CodexLogo", bundle: .module)
-                    .renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+                    .renderingMode(.template).resizable().scaledToFit().frame(width: 12, height: 12)
                     .accessibilityLabel("Codex")
                 Text(model.codexMenuBarText ?? (model.codexLoading ? "…" : model.codexError == nil ? "—" : "!"))
                     .monospacedDigit().help(model.codexError ?? "Codex 5-hour window")
                 Image("CopilotLogo", bundle: .module)
-                    .renderingMode(.template).resizable().scaledToFit().frame(width: 16, height: 16)
+                    .renderingMode(.template).resizable().scaledToFit().frame(width: 12, height: 12)
                     .accessibilityLabel("GitHub Copilot")
-                Text(model.copilotMenuBarText ?? (model.copilotLoading ? "M …" : "M —"))
+                Text(model.copilotMenuBarText ?? (model.copilotLoading ? "M…" : "M—"))
                     .monospacedDigit().help(model.copilotError ?? "Copilot monthly quota")
             }
-            .fixedSize()
+            .font(.system(size: 11, weight: .medium, design: .rounded))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
         }
         .menuBarExtraStyle(.window)
     }
