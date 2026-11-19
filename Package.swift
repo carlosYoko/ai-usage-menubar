@@ -10,7 +10,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "UsageCore"),
-        .executableTarget(name: "AIUsageMenubar", dependencies: ["UsageCore"]),
+        .executableTarget(name: "AIUsageMenubar", dependencies: ["UsageCore"], resources: [.process("Resources")]),
         .executableTarget(name: "UsageCoreChecks", dependencies: ["UsageCore"], path: "Tests/UsageCoreChecks")
     ]
 )

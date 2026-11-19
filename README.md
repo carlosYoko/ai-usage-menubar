@@ -4,9 +4,9 @@ Aplicación nativa de macOS (Swift/SwiftUI) para consultar cuotas de Codex y Git
 
 ## Qué muestra
 
-- Codex: porcentajes restantes de las ventanas que publica `codex app-server` (por ejemplo 5h y 7d), reset y créditos disponibles. El canje de créditos exige confirmación explícita y conserva la clave de idempotencia ante resultados inciertos.
+- Codex: en la barra aparece el porcentaje restante y el tiempo hasta el reset de la ventana de 5h. La ventana semanal, los resets y los créditos disponibles están en el panel. El canje de créditos exige confirmación explícita y conserva la clave de idempotencia ante resultados inciertos.
 - Copilot: porcentaje restante mensual por cada cuenta GitHub CLI autenticada.
-- Ambos porcentajes aparecen en la barra de menús con símbolos de proveedor; al hacer clic se ven resets y detalles. Codex no publica una ventana exacta de 24h en esta respuesta, así que se muestran sus ventanas reales, sin inventar una cuota diaria.
+- Ambos porcentajes aparecen en la barra con sus logos; al hacer clic se ven los resets y demás detalles. Codex no publica una ventana exacta de 24h, así que se usa su ventana real de 5h.
 - Actualización manual y periódica, con última consulta visible.
 
 ## Vincular GitHub sin API key

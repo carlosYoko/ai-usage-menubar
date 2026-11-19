@@ -74,14 +74,15 @@ final class AppModel: ObservableObject {
     var isGitHubHidden: Bool { githubHidden }
 
     var codexMenuBarText: String? {
-        guard let report = codexReport, !report.windows.isEmpty else { return nil }
-        return report.windows.map { window in
-            let duration: String
-            if window.durationMinutes % 1440 == 0 { duration = "\(window.durationMinutes / 1440)d" }
-            else if window.durationMinutes % 60 == 0 { duration = "\(window.durationMinutes / 60)h" }
-            else { duration = "\(window.durationMinutes)m" }
-            return "\(duration) \(Int(window.remainingPercent.rounded()))%"
-        }.joined(separator: " ")
+        guard let report = codexReport, !report.windows.isEmpty,
+              let window = report.windows.first(where: { $0.durationMinutes == 300 }) ?? report.windows.first else { return nil }
+        let percent = Int(window.remainingPercent.rounded())
+        guard let reset = window.resetsAt else { return "\(percent)%" }
+        let minutes = max(0, Int(ceil(reset.timeIntervalSinceNow / 60)))
+        let hours = minutes / 60
+        let remainder = minutes % 60
+        let time = remainder == 0 ? "\(hours)h" : "\(hours)h \(remainder)m"
+        return "\(percent)% \(time)"
     }
 
     var copilotMenuBarText: String? {
