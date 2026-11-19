@@ -85,7 +85,8 @@ final class AppModel: ObservableObject {
     var copilotMenuBarText: String? {
         let accounts = copilotAccounts.compactMap { account -> String? in
             guard let metric = account.report?.metrics.first else { return nil }
-            return "\(Int(metric.remainingPercent.rounded()))%"
+            let percent = Int(metric.remainingPercent.rounded())
+            return copilotAccounts.count == 1 ? "M \(percent)%" : "\(account.login) M\(percent)%"
         }
         return accounts.isEmpty ? nil : accounts.joined(separator: " ")
     }
