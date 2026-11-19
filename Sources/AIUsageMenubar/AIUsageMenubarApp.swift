@@ -22,7 +22,7 @@ struct AIUsageMenubarApp: App {
                 Image("CopilotLogo", bundle: .module)
                     .renderingMode(.template).resizable().scaledToFit().frame(width: 12, height: 12)
                     .accessibilityLabel("GitHub Copilot")
-                Text(model.copilotMenuBarText ?? (model.copilotLoading ? "M…" : "M—"))
+                Text(model.copilotMenuBarText ?? (model.copilotLoading ? "…" : "—"))
                     .monospacedDigit().help(model.copilotError ?? "Copilot monthly quota")
             }
             .font(.system(size: 11, weight: .medium, design: .rounded))
