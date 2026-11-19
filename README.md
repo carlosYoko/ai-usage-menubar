@@ -4,7 +4,7 @@ Aplicación nativa de macOS (Swift/SwiftUI) para consultar el uso de distintos a
 
 ## Alcance previsto
 
-- Codex: leer cuotas por ventana y próximos resets usando `codex app-server`; mantener confirmación explícita antes de canjear un crédito de reset.
+- Codex: porcentajes restantes por ventana en la barra de menús, próximos resets y créditos disponibles mediante `codex app-server`; el canje exige confirmación explícita.
 - GitHub Copilot: mostrar consumo de AI credits o premium requests reportado por la API oficial de GitHub. No inventar cuota restante cuando la API no la proporciona.
 - Diseño extensible para añadir Kimi, Claude u otros agentes más adelante.
 - Actualización manual y periódica con caché y hora de última consulta.

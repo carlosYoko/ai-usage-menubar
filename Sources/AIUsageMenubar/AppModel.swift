@@ -67,6 +67,18 @@ final class AppModel: ObservableObject {
 
     var pendingResetTitle: String? { pendingReset?.title }
 
+    var menuBarTitle: String {
+        guard let report = codexReport else { return codexError == nil ? "AI Usage" : "Codex !" }
+        let windows = report.windows.map { window in
+            let duration: String
+            if window.durationMinutes % 1440 == 0 { duration = "\(window.durationMinutes / 1440)d" }
+            else if window.durationMinutes % 60 == 0 { duration = "\(window.durationMinutes / 60)h" }
+            else { duration = "\(window.durationMinutes)m" }
+            return "\(duration) \(Int(window.remainingPercent.rounded()))%"
+        }
+        return windows.isEmpty ? "AI Usage" : windows.joined(separator: "  ")
+    }
+
     func requestReset(_ credit: CodexResetCredit) {
         guard pendingReset == nil else { return }
         selectedResetCredit = credit

@@ -13,7 +13,11 @@ struct AIUsageMenubarApp: App {
         MenuBarExtra {
             MenuContentView(model: model)
         } label: {
-            Label("AI Usage", systemImage: "chart.bar.xaxis")
+            Label {
+                Text(model.menuBarTitle).monospacedDigit()
+            } icon: {
+                Image(systemName: "chart.bar.xaxis")
+            }
         }
         .menuBarExtraStyle(.window)
     }
