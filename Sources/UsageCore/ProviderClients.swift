@@ -21,9 +21,9 @@ public enum ProviderError: Error, LocalizedError {
         case .codexTimedOut: "Codex app-server timed out."
         case .codexExited: "Codex app-server exited before returning quota data."
         case .codexProtocol(let message): "Codex app-server error: \(message)"
-        case .missingGitHubClientID: "Enter the Client ID of your GitHub App."
+        case .missingGitHubClientID: "Enter the Client ID of your GitHub OAuth App."
         case .unauthorized: "GitHub authorization expired. Reconnect the account."
-        case .forbidden: "GitHub denied billing usage access. Check the App's Plan: read permission and account billing eligibility."
+        case .forbidden: "GitHub denied access to the internal Copilot quota endpoint. The endpoint may be unavailable for this account or may have changed."
         case .httpStatus(let code): "GitHub API returned HTTP \(code)."
         case .malformedResponse: "The provider returned an unsupported response."
         case .deviceAuthorization(let message): "GitHub authorization: \(message)"
@@ -49,13 +49,13 @@ public final class GitHubDeviceFlow: @unchecked Sendable {
     private let session: URLSession
     public init(session: URLSession = .shared) { self.session = session }
 
-    public func begin(clientID: String) async throws -> DeviceAuthorization {
+    public func begin(clientID: String, scope: String = "read:user") async throws -> DeviceAuthorization {
         guard !clientID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw ProviderError.missingGitHubClientID }
         var request = URLRequest(url: URL(string: "https://github.com/login/device/code")!)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = formBody(["client_id": clientID])
+        request.httpBody = formBody(["client_id": clientID, "scope": scope])
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
               let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -111,49 +111,26 @@ public final class GitHubDeviceFlow: @unchecked Sendable {
     }
 }
 
-public final class GitHubBillingClient: @unchecked Sendable {
+public final class GitHubCopilotClient: @unchecked Sendable {
     private let session: URLSession
     public init(session: URLSession = .shared) { self.session = session }
 
-    public func currentUser(token: String) async throws -> String {
-        let json = try await getJSON(path: "/user", token: token)
-        guard let login = json["login"] as? String else { throw ProviderError.malformedResponse }
-        return login
-    }
-
-    public func copilotUsage(token: String, username: String, date: Date = .now) async throws -> CopilotUsageReport {
-        var components = URLComponents(string: "https://api.github.com/users/\(username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? username)/settings/billing/ai_credit/usage")!
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
-        components.queryItems = [
-            URLQueryItem(name: "year", value: String(calendar.component(.year, from: date))),
-            URLQueryItem(name: "month", value: String(calendar.component(.month, from: date)))
-        ]
-        guard let url = components.url else { throw ProviderError.malformedResponse }
-        let data = try await getData(url: url, token: token)
-        return try CopilotUsageReport.parse(data, now: date)
-    }
-
-    private func getJSON(path: String, token: String) async throws -> [String: Any] {
-        let data = try await getData(url: URL(string: "https://api.github.com\(path)")!, token: token)
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw ProviderError.malformedResponse }
-        return json
-    }
-
-    private func getData(url: URL, token: String) async throws -> Data {
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+    public func copilotQuota(token: String, date: Date = .now) async throws -> CopilotQuotaReport {
+        var request = URLRequest(url: URL(string: "https://api.github.com/copilot_internal/user")!)
+        request.setValue("token \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("vscode/1.96.2", forHTTPHeaderField: "Editor-Version")
+        request.setValue("copilot-chat/0.26.7", forHTTPHeaderField: "Editor-Plugin-Version")
+        request.setValue("GitHubCopilotChat/0.26.7", forHTTPHeaderField: "User-Agent")
+        request.setValue("2025-04-01", forHTTPHeaderField: "X-Github-Api-Version")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ProviderError.malformedResponse }
-        switch http.statusCode {
-        case 200..<300: return data
-        case 401: throw ProviderError.unauthorized
-        case 403: throw ProviderError.forbidden
-        default: throw ProviderError.httpStatus(http.statusCode)
-        }
+        if http.statusCode == 401 { throw ProviderError.unauthorized }
+        if http.statusCode == 403 { throw ProviderError.forbidden }
+        guard (200..<300).contains(http.statusCode) else { throw ProviderError.httpStatus(http.statusCode) }
+        return try CopilotQuotaReport.parseInternalResponse(data, now: date)
     }
+
 }
 
 public final class GitHubTokenStore: @unchecked Sendable {

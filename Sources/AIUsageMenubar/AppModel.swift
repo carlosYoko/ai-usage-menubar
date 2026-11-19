@@ -18,11 +18,10 @@ final class AppModel: ObservableObject {
     @Published var showResetConfirmation = false
     @Published var resetMessage: String?
     @Published var resetError: String?
-    @Published var copilotReport: CopilotUsageReport?
+    @Published var copilotReport: CopilotQuotaReport?
     @Published var copilotError: String?
     @Published var copilotLoading = false
     @Published var githubClientID = UserDefaults.standard.string(forKey: "githubClientID") ?? ""
-    @Published var githubUser: String?
     @Published var githubConnected = false
     @Published var authorization: DeviceAuthorization?
     @Published var authorizationMessage: String?
@@ -30,7 +29,7 @@ final class AppModel: ObservableObject {
 
     private let codex = CodexAppServerClient()
     private let deviceFlow = GitHubDeviceFlow()
-    private let github = GitHubBillingClient()
+    private let github = GitHubCopilotClient()
     private let tokenStore = GitHubTokenStore()
     private var token: String?
     private var pendingReset: PendingResetAttempt? {
@@ -68,15 +67,18 @@ final class AppModel: ObservableObject {
     var pendingResetTitle: String? { pendingReset?.title }
 
     var menuBarTitle: String {
-        guard let report = codexReport else { return codexError == nil ? "AI Usage" : "Codex !" }
-        let windows = report.windows.map { window in
+        var items: [String] = codexReport?.windows.map { window in
             let duration: String
             if window.durationMinutes % 1440 == 0 { duration = "\(window.durationMinutes / 1440)d" }
             else if window.durationMinutes % 60 == 0 { duration = "\(window.durationMinutes / 60)h" }
             else { duration = "\(window.durationMinutes)m" }
             return "\(duration) \(Int(window.remainingPercent.rounded()))%"
+        } ?? []
+        if let copilot = copilotReport?.metrics.first {
+            items.append("Copilot \(Int(copilot.remainingPercent.rounded()))%")
         }
-        return windows.isEmpty ? "AI Usage" : windows.joined(separator: "  ")
+        if items.isEmpty { return codexError == nil ? "AI Usage" : "Codex !" }
+        return items.joined(separator: "  ")
     }
 
     func requestReset(_ credit: CodexResetCredit) {
@@ -134,9 +136,7 @@ final class AppModel: ObservableObject {
         copilotError = nil
         defer { copilotLoading = false }
         do {
-            let user = try await github.currentUser(token: token)
-            githubUser = user
-            copilotReport = try await github.copilotUsage(token: token, username: user)
+            copilotReport = try await github.copilotQuota(token: token)
         } catch {
             copilotError = error.localizedDescription
             if let providerError = error as? ProviderError, case .unauthorized = providerError {
@@ -180,7 +180,6 @@ final class AppModel: ObservableObject {
         do {
             try tokenStore.delete()
             token = nil
-            githubUser = nil
             copilotReport = nil
             copilotError = nil
             githubConnected = false

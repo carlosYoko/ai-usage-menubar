@@ -23,7 +23,7 @@ struct MenuContentView: View {
             }
         }
         .padding(16)
-        .frame(width: 360)
+        .frame(width: 380)
         .confirmationDialog("Use one Codex reset credit?", isPresented: $model.showResetConfirmation, titleVisibility: .visible) {
             Button("Confirm and use 1 reset", role: .destructive) {
                 Task { await model.confirmReset() }
@@ -103,34 +103,34 @@ struct MenuContentView: View {
                 }
             }
             if let report = model.copilotReport {
-                Text("Reported usage · \(monthName(report.period.month)) \(report.period.year)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if report.items.isEmpty {
-                    Text("No Copilot usage items reported for this period.").font(.caption)
-                } else {
-                    ForEach(report.totalsByUnit.keys.sorted(), id: \.self) { unit in
+                if !report.metrics.isEmpty {
+                    ForEach(report.metrics) { metric in
                         HStack {
-                            Text(unit)
+                            Text(metric.label)
                             Spacer()
-                            Text(quantity(report.totalsByUnit[unit] ?? 0)).monospacedDigit()
+                            Text("\(Int(metric.remainingPercent.rounded()))% remaining").monospacedDigit()
+                            if let reset = metric.resetsAt { Text(countdown(to: reset)).foregroundStyle(.secondary) }
                         }.font(.caption)
                     }
+                } else if let used = report.creditsUsed {
+                    Text("Credits used: \(quantity(used)) · percentage unavailable")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Consumption only; GitHub's report doesn't include remaining allowance.")
+                Text("Quota from GitHub's undocumented Copilot endpoint; may change without notice.")
                     .font(.caption2).foregroundStyle(.secondary)
                 Text("Updated \(report.fetchedAt.formatted(date: .omitted, time: .shortened))")
                     .font(.caption2).foregroundStyle(.tertiary)
             } else if let error = model.copilotError {
                 Text(error).font(.caption).foregroundStyle(.red)
             } else if model.githubConnected {
-                Text(model.copilotLoading ? "Reading Copilot usage…" : "No report loaded")
+                Text(model.copilotLoading ? "Reading Copilot quota…" : "No quota data loaded")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Connect GitHub to read personal billing usage.")
+                Text("Connect GitHub to read Copilot quota.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if !model.githubConnected {
-                TextField("GitHub App Client ID", text: $model.githubClientID)
+                TextField("GitHub OAuth App Client ID", text: $model.githubClientID)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.saveClientID() }
                 HStack {
@@ -143,7 +143,7 @@ struct MenuContentView: View {
                         Button("Open verification") { model.openVerificationPage() }
                     }
                 }
-                Text("Requires a device-flow-enabled GitHub App with Plan: read permission.")
+                Text("Requires a device-flow-enabled GitHub OAuth App; requests read:user.")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             if let message = model.authorizationMessage {
@@ -166,10 +166,6 @@ struct MenuContentView: View {
         let total = max(0, Int(ceil(date.timeIntervalSinceNow / 60)))
         let days = total / 1440, hours = total % 1440 / 60, minutes = total % 60
         return days > 0 ? "\(days)d \(hours)h \(minutes)m" : "\(hours)h \(minutes)m"
-    }
-
-    private func monthName(_ month: Int) -> String {
-        Calendar.current.monthSymbols.indices.contains(month - 1) ? Calendar.current.monthSymbols[month - 1] : "Month \(month)"
     }
 
     private func quantity(_ value: Double) -> String {

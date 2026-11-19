@@ -37,14 +37,30 @@ struct UsageCoreChecks {
         check(copilot.period.year == 2026 && copilot.period.month == 11, "Copilot report period decodes")
         check(copilot.totalsByUnit["ai-credits"] == 13, "AI credits aggregate independently")
         check(copilot.totalsByUnit["requests"] == 2, "legacy premium requests remain separate")
-        check(copilot.remainingAllowance == nil, "No unsupported remaining allowance is invented")
+        check(copilot.remainingAllowance == nil, "Documented billing report has no remaining allowance")
+
+        let quotaPayload = #"""
+        {
+          "copilot_plan":"individual",
+          "quota_reset_date":"2026-12-01T00:00:00Z",
+          "quota_snapshots": {
+            "premium_interactions":{"entitlement":300,"remaining":216,"percent_remaining":72},
+            "chat":{"unlimited":true,"entitlement":-1,"remaining":-1}
+          }
+        }
+        """#
+        let quota = try CopilotQuotaReport.parseInternalResponse(Data(quotaPayload.utf8))
+        check(quota.metrics.count == 1, "Unlimited Copilot quotas are suppressed")
+        check(quota.metrics.first?.id == "premium_interactions", "Premium quota decodes")
+        check(quota.metrics.first?.remainingPercent == 72, "Copilot remaining percentage decodes")
+        check(quota.metrics.first?.resetsAt != nil, "Copilot reset date decodes")
         do {
             _ = try await CodexAppServerClient().consumeReset(creditID: "mock-credit", idempotencyKey: UUID().uuidString, confirmed: false)
             fatalError("FAIL: Codex reset consumption must reject missing confirmation")
         } catch let error as ProviderError {
             guard case .codexProtocol = error else { throw error }
         }
-        print("Passed: Codex quota/reset decoding; unconfirmed reset blocked; Copilot aggregation; no invented allowance.")
+        print("Passed: Codex quota/reset decoding; unconfirmed reset blocked; Copilot billing aggregation and quota percentage decoding.")
 
         if CommandLine.arguments.contains("--live-codex") {
             let report = try await CodexAppServerClient().readUsage()
