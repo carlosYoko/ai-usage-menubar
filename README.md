@@ -10,10 +10,18 @@ Aplicación nativa de macOS (Swift/SwiftUI) para consultar el uso de distintos a
 - Actualización manual y periódica con caché y hora de última consulta.
 - Credenciales GitHub almacenadas en macOS Keychain; nunca en archivos versionados.
 
-## Autorización de GitHub
+## GitHub setup
 
-La autorización prevista para GitHub es OAuth por navegador, usando el flujo compatible con aplicaciones nativas (Authorization Code con PKCE y callback local o URL scheme). No incluir client secrets en la app. Antes de implementar, registrar/configurar una OAuth App de GitHub y confirmar los permisos mínimos disponibles para los endpoints individuales de billing (`Plan: read`).
+Register a **GitHub App** under your personal account, enable **Device Flow**, and grant the user permission **Plan: read**. The app asks for its public Client ID; no client secret or callback URL is used. Do not use a classic OAuth App: its scopes do not represent the fine-grained `Plan: read` permission required by the personal billing report.
 
-## Estado
+The user approves access in GitHub's browser verification page. The access token is stored in macOS Keychain only. Disconnecting removes this Mac's copy; revoke the app authorization separately in GitHub settings. The billing report is monthly usage, not remaining quota, and may be delayed.
 
-Solo se ha creado el repositorio local `ai-usage-menubar` y este documento de alcance. No hay implementación Swift ni configuración OAuth todavía.
+Official API: [Get billing AI credit usage report for a user](https://docs.github.com/en/rest/billing/usage#get-billing-ai-credit-usage-report-for-a-user).
+
+## Build and check
+
+Requires macOS 13+ and Swift 6. Build the menu bar app with `swift build --product AIUsageMenubar`; run parser, aggregation, and confirmation-guard checks with `swift run UsageCoreChecks`. Launch locally with `swift run AIUsageMenubar`. The checks do not contact GitHub and never redeem a Codex reset. `swift run UsageCoreChecks --live-codex` performs an optional read-only Codex app-server check.
+
+## Status and limitations
+
+MVP implementation: SwiftUI menu bar app, Codex `app-server` quota/reset-credit reads, explicitly confirmed Codex reset consumption with a persistent idempotency key for uncertain outcomes, and GitHub Copilot AI-credit usage via the official personal billing endpoint. Legacy premium-request reports are not queried. No Copilot allowance or remaining percentage is invented. OAuth requires a GitHub App Client ID configured by the user; live GitHub authorization has not been tested.
