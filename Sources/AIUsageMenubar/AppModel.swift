@@ -73,20 +73,24 @@ final class AppModel: ObservableObject {
     var pendingResetTitle: String? { pendingReset?.title }
     var isGitHubHidden: Bool { githubHidden }
 
-    var menuBarTitle: String {
-        var items: [String] = codexReport?.windows.map { window in
+    var codexMenuBarText: String? {
+        guard let report = codexReport, !report.windows.isEmpty else { return nil }
+        return report.windows.map { window in
             let duration: String
             if window.durationMinutes % 1440 == 0 { duration = "\(window.durationMinutes / 1440)d" }
             else if window.durationMinutes % 60 == 0 { duration = "\(window.durationMinutes / 60)h" }
             else { duration = "\(window.durationMinutes)m" }
             return "\(duration) \(Int(window.remainingPercent.rounded()))%"
-        } ?? []
-        for account in copilotAccounts {
-            guard let metric = account.report?.metrics.first else { continue }
-            items.append("GH:\(account.login) \(Int(metric.remainingPercent.rounded()))%")
+        }.joined(separator: " ")
+    }
+
+    var copilotMenuBarText: String? {
+        let accounts = copilotAccounts.compactMap { account -> String? in
+            guard let metric = account.report?.metrics.first else { return nil }
+            let percent = "M \(Int(metric.remainingPercent.rounded()))%"
+            return copilotAccounts.count == 1 ? percent : "\(account.login) \(percent)"
         }
-        if items.isEmpty { return codexError == nil ? "AI Usage" : "Codex !" }
-        return items.joined(separator: "  ")
+        return accounts.isEmpty ? nil : accounts.joined(separator: " ")
     }
 
     func requestReset(_ credit: CodexResetCredit) {
