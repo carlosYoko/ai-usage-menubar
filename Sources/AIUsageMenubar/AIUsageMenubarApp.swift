@@ -61,8 +61,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         title.append(NSAttributedString(string: " \(model.codexMenuBarText ?? (model.codexLoading ? "…" : model.codexError == nil ? "—" : "!"))  ", attributes: attributes))
         appendIcon("CopilotLogo", to: title)
         title.append(NSAttributedString(string: " \(model.copilotMenuBarText ?? (model.copilotLoading ? "M…" : "M—"))", attributes: attributes))
+        
+        if model.helmcodeMenuBarText != nil {
+            appendIcon("HelmcodeLogo", to: title)
+            title.append(NSAttributedString(string: " \(model.helmcodeMenuBarText ?? (model.helmcodeLoading ? "…" : "—"))", attributes: attributes))
+        }
+        
         button.attributedTitle = title
-        button.toolTip = [model.codexError, model.copilotError].compactMap { $0 }.joined(separator: "\n")
+        button.toolTip = [model.codexError, model.copilotError, model.helmcodeError].compactMap { $0 }.joined(separator: "\n")
     }
 
     private func appendIcon(_ name: String, to title: NSMutableAttributedString) {

@@ -152,7 +152,11 @@ public final class GitHubTokenStore: @unchecked Sendable {
 
 public final class CodexAppServerClient: @unchecked Sendable {
     private let executableURL: URL?
-    public init(executableURL: URL? = nil) { self.executableURL = executableURL ?? Self.findCodex() }
+    private let timeoutSeconds: TimeInterval
+    public init(executableURL: URL? = nil, timeoutSeconds: TimeInterval = 20) {
+        self.executableURL = executableURL ?? Self.findCodex()
+        self.timeoutSeconds = timeoutSeconds
+    }
 
     public func readUsage() async throws -> CodexUsageReport {
         try await Task.detached(priority: .utility) {
@@ -191,7 +195,7 @@ public final class CodexAppServerClient: @unchecked Sendable {
         process.standardError = FileHandle.nullDevice
         do { try process.run() } catch { throw ProviderError.codexNotFound }
         let timeout = DispatchWorkItem { if process.isRunning { process.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 20, execute: timeout)
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: timeout)
         defer {
             timeout.cancel()
             try? input.fileHandleForWriting.close()
@@ -201,18 +205,34 @@ public final class CodexAppServerClient: @unchecked Sendable {
         }
         var reader = JSONLineReader(handle: output.fileHandleForReading)
         do {
-            try write(["id": 1, "method": "initialize", "params": ["clientInfo": ["name": "ai_usage_menubar", "title": "AI Usage Menubar", "version": "0.1.0"], "capabilities": NSNull()]], to: input)
+            try writeToPipe(["id": 1, "method": "initialize", "params": ["clientInfo": ["name": "ai_usage_menubar", "title": "AI Usage Menubar", "version": "0.1.0"], "capabilities": NSNull()]], to: input)
         } catch { throw ProviderError.codexProtocol("app-server closed stdin during initialize") }
         let initialized = try reader.response(id: 1)
         if let error = initialized["error"] { throw ProviderError.codexProtocol(String(describing: error)) }
-        do { try write(["method": "initialized"], to: input) }
+        do { try writeToPipe(["method": "initialized"], to: input) }
         catch { throw ProviderError.codexProtocol("app-server closed stdin on initialized notification (running: \(process.isRunning), status: \(process.terminationStatus))") }
-        do { try write(["id": 2, "method": method, "params": params], to: input) }
+        do { try writeToPipe(["id": 2, "method": method, "params": params], to: input) }
         catch { throw ProviderError.codexProtocol("app-server closed stdin on usage request") }
         let response = try reader.response(id: 2)
         if let error = response["error"] { throw ProviderError.codexProtocol(String(describing: error)) }
         guard let result = response["result"] as? [String: Any] else { throw ProviderError.malformedResponse }
         return result
+    }
+
+    private func writeToPipe(_ object: [String: Any], to pipe: Pipe) throws {
+        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) + Data([10])
+        try data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { throw ProviderError.malformedResponse }
+            var offset = 0
+            while offset < bytes.count {
+                let written = Darwin.write(pipe.fileHandleForWriting.fileDescriptor, base.advanced(by: offset), bytes.count - offset)
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    throw ProviderError.codexExited
+                }
+                offset += written
+            }
+        }
     }
 
     private static func findCodex() -> URL? {
@@ -238,21 +258,29 @@ public final class CodexAppServerClient: @unchecked Sendable {
         }
         return candidates.first(where: FileManager.default.isExecutableFile(atPath:)).map(URL.init(fileURLWithPath:))
     }
+}
 
-    private func write(_ object: [String: Any], to pipe: Pipe) throws {
-        let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) + Data([10])
-        try data.withUnsafeBytes { bytes in
-            guard let base = bytes.baseAddress else { throw ProviderError.malformedResponse }
-            var offset = 0
-            while offset < bytes.count {
-                let written = Darwin.write(pipe.fileHandleForWriting.fileDescriptor, base.advanced(by: offset), bytes.count - offset)
-                if written < 0 {
-                    if errno == EINTR { continue }
-                    throw ProviderError.codexExited
-                }
-                offset += written
-            }
+public final class HelmcodeClient: @unchecked Sendable {
+    private let apiKey: String
+    private let session: URLSession
+    private let endpoint = URL(string: "https://api.helmcode.com/v1/usage")! // <--- CAMBIAR POR EL REAL
+
+    public init(apiKey: String, session: URLSession = .shared) {
+        self.apiKey = apiKey
+        self.session = session
+    }
+
+    public func fetchUsage() async throws -> HelmcodeUsageReport {
+        var request = URLRequest(url: endpoint)
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw ProviderError.malformedResponse
         }
+        
+        return try HelmcodeUsageReport.parse(data)
     }
 }
 

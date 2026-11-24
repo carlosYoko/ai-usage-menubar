@@ -13,6 +13,8 @@ struct MenuContentView: View {
             Divider()
             copilotSection
             Divider()
+            helmcodeSection
+            Divider()
             Toggle("Open at login", isOn: Binding(
                 get: { model.launchAtLoginEnabled },
                 set: { model.setLaunchAtLogin($0) }
@@ -23,7 +25,7 @@ struct MenuContentView: View {
             }
             HStack {
                 Button("Refresh all") {
-                    Task { await model.refreshCodex(); await model.refreshCopilot() }
+                    Task { await model.refreshCodex(); await model.refreshCopilot(); await model.refreshHelmcode() }
                 }
                 .keyboardShortcut("r")
                 Spacer()
@@ -46,7 +48,7 @@ struct MenuContentView: View {
         HStack {
             Label("AI Usage", systemImage: "chart.bar.xaxis").font(.headline)
             Spacer()
-            if model.codexLoading || model.copilotLoading {
+            if model.codexLoading || model.copilotLoading || model.helmcodeLoading {
                 ProgressView().controlSize(.small)
             }
         }
@@ -152,6 +154,39 @@ struct MenuContentView: View {
             }
             if let error = model.copilotError {
                 Text(error).font(.caption2).foregroundStyle(.red)
+            }
+        }
+    }
+
+    private var helmcodeSection: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack {
+                Text("Helmcode").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("Refresh") { Task { await model.refreshHelmcode() } }.buttonStyle(.link)
+            }
+            if let report = model.helmcodeReport {
+                ForEach(report.models) { item in
+                    HStack {
+                        Text(item.name)
+                        Spacer()
+                        if case .unlimited = item.usage {
+                            Text("Flat rate").font(.caption).foregroundStyle(.secondary)
+                        } else if case .quota(let percent, let reset) = item.usage {
+                            HStack {
+                                Text("\(Int(percent.rounded()))% remaining").monospacedDigit()
+                                if let reset = reset { Text(countdown(to: reset)).foregroundStyle(.secondary) }
+                            }.font(.caption)
+                        }
+                    }.font(.caption)
+                }
+                Text("Updated \(report.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            } else if let error = model.helmcodeError {
+                Text(error).font(.caption).foregroundStyle(.red)
+            } else {
+                Text(model.helmcodeLoading ? "Reading Helmcode usage…" : "No usage data yet")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
     }

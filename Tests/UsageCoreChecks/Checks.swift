@@ -4,6 +4,11 @@ import UsageCore
 @main
 struct UsageCoreChecks {
     static func main() async throws {
+        if CommandLine.arguments.dropFirst().first == "app-server" {
+            try runMockCodexAppServer()
+            return
+        }
+
         let codexPayload = #"""
         {
           "rateLimitsByLimitId": {"codex": {
@@ -21,6 +26,13 @@ struct UsageCoreChecks {
         check(codex.availableResetCredits == 2, "Codex available reset credits decode")
         check(codex.resetCredits.first?.id == "mock-credit", "Codex reset details decode")
         check(codex.resetCredits.first?.type == "codexRateLimits", "Reset type is preserved for allowlisting")
+
+        let mockClient = CodexAppServerClient(
+            executableURL: URL(fileURLWithPath: CommandLine.arguments[0]),
+            timeoutSeconds: 1
+        )
+        let mockReport = try await mockClient.readUsage()
+        check(mockReport.windows.count == 2, "Codex app-server exchanges JSONL over child stdio")
 
         let copilotPayload = #"""
         {
@@ -73,6 +85,33 @@ struct UsageCoreChecks {
                 let report = try await GitHubCopilotClient().copilotQuota(token: account.accessToken)
                 print("GitHub CLI Copilot read-only check passed for account \(index + 1): \(report.metrics.count) quota metrics.")
             }
+        }
+    }
+
+    private static func runMockCodexAppServer() throws {
+        while let line = readLine() {
+            let requestData = Data(line.utf8)
+            guard let request = try JSONSerialization.jsonObject(with: requestData) as? [String: Any],
+                  let method = request["method"] as? String,
+                  let id = request["id"] else { continue }
+
+            let result: [String: Any]
+            if method == "initialize" {
+                result = ["protocolVersion": "2025-03-26", "capabilities": [:],
+                          "serverInfo": ["name": "mock-codex", "version": "1"]]
+            } else if method == "account/rateLimits/read" {
+                result = ["rateLimitsByLimitId": ["codex": [
+                    "primary": ["usedPercent": 20, "windowDurationMins": 300],
+                    "secondary": ["usedPercent": 35, "windowDurationMins": 10080]
+                ]]]
+            } else {
+                continue
+            }
+
+            let response: [String: Any] = ["id": id, "result": result]
+            var responseData = try JSONSerialization.data(withJSONObject: response)
+            responseData.append(0x0A)
+            FileHandle.standardOutput.write(responseData)
         }
     }
 

@@ -32,6 +32,9 @@ final class AppModel: ObservableObject {
     @Published var githubConnected = false
     @Published var githubUsesCLI = false
     @Published var githubMessage: String?
+    @Published var helmcodeReport: HelmcodeUsageReport?
+    @Published var helmcodeError: String?
+    @Published var helmcodeLoading = false
     @Published var launchAtLoginEnabled = SMAppService.mainApp.status == .enabled
     @Published var launchAtLoginMessage: String?
     @Published private var countdownNow = Date.now
@@ -39,6 +42,7 @@ final class AppModel: ObservableObject {
     private let codex = CodexAppServerClient()
     private let githubCLI = GitHubCLIAuthClient()
     private let github = GitHubCopilotClient()
+    private let helmcode = HelmcodeClient(apiKey: ProcessInfo.processInfo.environment["HELMCODE_API_KEY"] ?? "")
     private let tokenStore = GitHubTokenStore()
     private var token: String?
     private var githubHidden = UserDefaults.standard.bool(forKey: "github.hiddenInApp")
@@ -64,6 +68,7 @@ final class AppModel: ObservableObject {
         }
         Task { await refreshCodex() }
         Task { await refreshCopilot() }
+        Task { await refreshHelmcode() }
         Task {
             var minutesSinceRefresh = 0
             while !Task.isCancelled {
@@ -75,6 +80,7 @@ final class AppModel: ObservableObject {
                     minutesSinceRefresh = 0
                     await refreshCodex()
                     await refreshCopilot()
+                    await refreshHelmcode()
                 }
             }
         }
@@ -102,6 +108,20 @@ final class AppModel: ObservableObject {
             return copilotAccounts.count == 1 ? "M \(percent)%" : "\(account.login) M\(percent)%"
         }
         return accounts.isEmpty ? nil : accounts.joined(separator: " ")
+    }
+
+    var helmcodeMenuBarText: String? {
+        guard let report = helmcodeReport else { return nil }
+        // If all are unlimited, just show "H"
+        if report.models.allSatisfy({ if case .unlimited = $0.usage { return true }; return false }) {
+            return "H"
+        }
+        // If there is a quota, show the first one's percentage
+        if let limited = report.models.first(where: { if case .quota = $0.usage { return true }; return false }),
+           case .quota(let percent, _) = limited.usage {
+            return "H \(Int(percent.rounded()))%"
+        }
+        return "H—"
     }
 
     func requestReset(_ credit: CodexResetCredit) {
@@ -141,6 +161,18 @@ final class AppModel: ObservableObject {
         defer { codexLoading = false }
         do { codexReport = try await codex.readUsage() }
         catch { codexError = error.localizedDescription }
+    }
+
+    func refreshHelmcode() async {
+        guard !helmcodeLoading else { return }
+        helmcodeLoading = true
+        helmcodeError = nil
+        defer { helmcodeLoading = false }
+        do {
+            helmcodeReport = try await helmcode.fetchUsage()
+        } catch {
+            helmcodeError = error.localizedDescription
+        }
     }
 
     func refreshCopilot() async {

@@ -211,3 +211,35 @@ public enum UsageParseError: Error, Equatable {
     case invalidCopilotItem
     case copilotQuotaUnavailable
 }
+
+public enum HelmcodeUsageType: Equatable, Sendable {
+    case unlimited
+    case quota(remainingPercent: Double, resetsAt: Date?)
+}
+
+public struct HelmcodeModelStatus: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let usage: HelmcodeUsageType
+
+    public init(id: String, name: String, usage: HelmcodeUsageType) {
+        self.id = id
+        self.name = name
+        self.usage = usage
+    }
+}
+
+public struct HelmcodeUsageReport: Equatable, Sendable {
+    public let models: [HelmcodeModelStatus]
+    public let fetchedAt: Date
+
+    public init(models: [HelmcodeModelStatus], fetchedAt: Date = .now) {
+        self.models = models
+        self.fetchedAt = fetchedAt
+    }
+
+    public static func parse(_ data: Data, now: Date = .now) throws -> HelmcodeUsageReport {
+        // Placeholder for actual implementation
+        throw UsageParseError.invalidCopilotResponse
+    }
+}
